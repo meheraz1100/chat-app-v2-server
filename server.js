@@ -8,33 +8,33 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
     cors: {
-        origin: '*', // Allow all origins
-        methods: ['GET', 'POST'],
-    },
+        origin: '*',
+        methods: ['GET', 'POST']
+    }
 });
 
 // Connect to MongoDB
 mongoose.connect('mongodb://localhost:27017/chatApp', {
     useNewUrlParser: true,
-    useUnifiedTopology: true,
+    useUnifiedTopology: true
 }).then(() => {
     console.log('✅ Connected to MongoDB');
 }).catch((err) => {
     console.error('❌ Failed to connect to MongoDB:', err);
 });
 
-// Define a schema for chat messages
+// Define message schema
 const messageSchema = new mongoose.Schema({
     username: String,
     text: String,
     timestamp: { type: Date, default: Date.now },
 });
 
-// Create a model for chat messages
+// Create message model
 const Message = mongoose.model('Message', messageSchema);
 
 app.use(cors());
-app.use(express.static('public'));
+app.use(express.json()); // Ensure JSON data is processed correctly
 
 // Handle socket connections
 io.on('connection', (socket) => {
@@ -44,7 +44,7 @@ io.on('connection', (socket) => {
     socket.on('set username', async (username) => {
         socket.username = username;
 
-        // Check if the user exists in the database
+        // Check if the username exists in the database
         const existingMessages = await Message.find({ username }).sort({ timestamp: 1 });
 
         if (existingMessages.length > 0) {
@@ -63,17 +63,21 @@ io.on('connection', (socket) => {
     socket.on('chat message', async (msg) => {
         if (!socket.username) return;
 
-        // Save message to MongoDB
-        const message = new Message({ username: socket.username, text: msg });
-        await message.save();
+        try {
+            // Save the message to MongoDB
+            const message = new Message({ username: socket.username, text: msg });
+            await message.save();
 
-        // Broadcast message to all users
-        io.emit('chat message', {
-            type: 'message',
-            username: socket.username,
-            text: msg,
-            timestamp: message.timestamp,
-        });
+            // Broadcast the message to all users
+            io.emit('chat message', {
+                type: 'message',
+                username: socket.username,
+                text: msg,
+                timestamp: message.timestamp
+            });
+        } catch (error) {
+            console.error('❌ Error saving message:', error);
+        }
     });
 
     // Handle user disconnect
@@ -88,8 +92,8 @@ io.on('connection', (socket) => {
     });
 });
 
-// Start the server
+// Start server
 const PORT = process.env.PORT || 4000;
 server.listen(PORT, () => {
-    console.log(`🚀 Server is running on http://localhost:${PORT}`);
+    console.log(`🚀 Server running on http://localhost:${PORT}`);
 });
