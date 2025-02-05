@@ -1,41 +1,73 @@
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
-const mongoose = require('./config/db'); // Import DB config
-const Message = require('./models/Message'); // Import Message model
-const PORT = process.env.PORT || 4000;
+const mongoose = require('mongoose');
+const cors = require('cors');
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
-    cors: { origin: "*" }
+    cors: {
+        origin: '*', // Allow all origins
+        methods: ['GET', 'POST'],
+    },
 });
 
-// Serve static files (if needed)
+// Connect to MongoDB
+mongoose.connect('mongodb://localhost:27017/chatApp', {
+    useNewUrlParser: true,
+    useUnifiedTopology: true,
+}).then(() => {
+    console.log('✅ Connected to MongoDB');
+}).catch((err) => {
+    console.error('❌ Failed to connect to MongoDB:', err);
+});
+
+// Define a schema for chat messages
+const messageSchema = new mongoose.Schema({
+    username: String,
+    text: String,
+    timestamp: { type: Date, default: Date.now },
+});
+
+// Create a model for chat messages
+const Message = mongoose.model('Message', messageSchema);
+
+app.use(cors());
 app.use(express.static('public'));
 
-// Socket.io connection
-io.on('connection', async (socket) => {
-    console.log('A user connected:', socket.id);
+// Handle socket connections
+io.on('connection', (socket) => {
+    console.log('🔗 A user connected:', socket.id);
 
+    // Handle username submission
     socket.on('set username', async (username) => {
         socket.username = username;
 
-        io.emit('chat message', {
-            type: 'notification',
-            text: `${username} has joined the chat!`
-        });
+        // Check if the user exists in the database
+        const existingMessages = await Message.find({ username }).sort({ timestamp: 1 });
 
-        const messages = await Message.find().sort({ timestamp: 1 }).limit(50);
-        socket.emit('chat history', messages);
+        if (existingMessages.length > 0) {
+            // Send chat history only to returning users
+            socket.emit('chat history', existingMessages);
+        } else {
+            // Notify all users about the new user
+            io.emit('chat message', {
+                type: 'notification',
+                text: `🟢 ${username} has joined the chat!`
+            });
+        }
     });
 
+    // Handle chat messages
     socket.on('chat message', async (msg) => {
         if (!socket.username) return;
 
+        // Save message to MongoDB
         const message = new Message({ username: socket.username, text: msg });
         await message.save();
 
+        // Broadcast message to all users
         io.emit('chat message', {
             type: 'message',
             username: socket.username,
@@ -44,17 +76,20 @@ io.on('connection', async (socket) => {
         });
     });
 
+    // Handle user disconnect
     socket.on('disconnect', () => {
         if (socket.username) {
             io.emit('chat message', {
                 type: 'notification',
-                text: `${socket.username} has left the chat.`
+                text: `🔴 ${socket.username} has left the chat.`
             });
         }
-        console.log('A user disconnected:', socket.id);
+        console.log('❌ A user disconnected:', socket.id);
     });
 });
 
+// Start the server
+const PORT = process.env.PORT || 4000;
 server.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
+    console.log(`🚀 Server is running on http://localhost:${PORT}`);
 });
